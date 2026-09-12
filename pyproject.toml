@@ -1,7 +1,7 @@
 [project]
 name = "flowmap"
-version = "0.1.0"
-description = "Hartă vizuală a execuției și a fluxului de date pentru proiecte Python, cu feliere dinamică (VS Code friendly)"
+version = "0.2.0"
+description = "Hartă vizuală a execuției și a fluxului de date pentru proiecte Python și PHP, cu feliere dinamică (VS Code friendly)"
 readme = "README.md"
 license = { text = "MIT" }
 authors = [{ name = "Paul Gabriel Mihăicuța" }]
@@ -28,7 +28,7 @@ build-backend = "setuptools.build_meta"
 include = ["flowmap*"]
 
 [tool.setuptools.package-data]
-flowmap = ["viewer/*.html", "templates/*.json"]
+flowmap = ["viewer/*.html", "templates/*.json", "php/*.php"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

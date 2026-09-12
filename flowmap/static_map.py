@@ -16,15 +16,20 @@ import time
 from pathlib import Path
 from typing import Any
 
-SKIP_DIRS = {".git", ".venv", "venv", "__pycache__", "node_modules", ".flowmap", "site-packages", ".tox", "build", "dist"}
+SKIP_DIRS = {".git", ".venv", "venv", "__pycache__", "node_modules", "vendor", ".flowmap", "site-packages", ".tox", "build", "dist"}
 ROUTE_DECORATORS = {"route", "get", "post", "put", "delete", "patch", "command", "task", "api_view", "websocket"}
 
 
-def _iter_py_files(root: Path):
-    for p in root.rglob("*.py"):
+def _iter_py_files(root: Path, pattern: str = "*.py"):
+    for p in sorted(root.rglob(pattern)):
         if any(part in SKIP_DIRS for part in p.relative_to(root).parts):
             continue
         yield p
+
+
+def _simple(qualname: str) -> str:
+    """Numele simplu al funcției: `A.b` (Python), `Ns\\A::b` sau `Ns\\f` (PHP)."""
+    return qualname.replace("::", ".").replace("\\", ".").rsplit(".", 1)[-1]
 
 
 class _Collector(ast.NodeVisitor):
@@ -149,14 +154,30 @@ def build_static(root: Path) -> dict[str, Any]:
         for imp, exact in c.imports:
             imports.append({"from": modname, "to": imp, "exact": exact})
 
+    # fișierele PHP: analizate de flowmap/php/static.php, în același format
+    php_files = list(_iter_py_files(root, "*.php"))
+    if php_files:
+        from .php import static_php
+        res = static_php(root, php_files)
+        if "error" in res:
+            for p in php_files:
+                rel = p.relative_to(root).as_posix()
+                modules.append({"file": rel, "module": rel[:-4].replace("/", "."), "error": res["error"]})
+        else:
+            modules.extend(res["modules"]); classes.extend(res["classes"]); functions.extend(res["functions"])
+            raw_calls.extend(res["calls"]); entry_points.extend(res["entry_points"])
+            imports.extend({**e, "exact": True} for e in res["imports"])
+
     # rezoluție euristică a apelurilor după numele simplu al funcției
     by_name: dict[str, list[str]] = {}
     for fn in functions:
-        by_name.setdefault(fn["qualname"].rsplit(".", 1)[-1], []).append(f'{fn["file"]}::{fn["qualname"]}')
+        by_name.setdefault(_simple(fn["qualname"]), []).append(f'{fn["file"]}::{fn["qualname"]}')
     call_edges: list[dict[str, Any]] = []
     seen = set()
     for rc in raw_calls:
         targets = by_name.get(rc["callee"], [])
+        if rc.get("class"):   # PHP `new X(...)`: constructorul clasei X, dacă e din proiect
+            targets = [t for t in targets if _simple(t.split("::", 1)[1].rsplit("::", 1)[0]) == rc["class"]]
         if not targets:
             continue
         # preferă ținta din același fișier, altfel toate candidatele (ambiguu)

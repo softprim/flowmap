@@ -2,19 +2,19 @@
 
 [![CI](https://github.com/softprim/flowmap/actions/workflows/ci.yml/badge.svg)](https://github.com/softprim/flowmap/actions/workflows/ci.yml)
 
-Hartă vizuală a execuției și a fluxului de date pentru proiecte Python, cu feliere dinamică,
+Hartă vizuală a execuției și a fluxului de date pentru proiecte Python și PHP, cu feliere dinamică,
 gândită să fie folosită din VS Code. Prototip pentru lucrarea de licență
 „Cartografierea vizuală a execuției software și analiza dinamică a fluxului de date”.
 
-Fără dependențe externe în Python (doar biblioteca standard, Python 3.12+).
-Vizualizatorul e un singur fișier HTML care folosește Cytoscape.js de pe CDN.
+Fără dependențe externe în Python (doar biblioteca standard, Python 3.12+). Pentru proiecte PHP e nevoie doar de
+binarul `php` (8.0+), fără extensii. Vizualizatorul e un singur fișier HTML care folosește Cytoscape.js de pe CDN.
 
 ## Ce face
 
 | Nivel | Modul | Ce produce |
 |---|---|---|
-| Schelet static | `flowmap/static_map.py` (`ast`) | module, clase, funcții, apeluri rezolvate după nume, puncte de intrare (`main`, `__main__`, `test_*`, decoratoare de rute) → `.flowmap/static.json` |
-| Instrumentare | `flowmap/tracer.py` (`sys.monitoring`) | fiecare apel din proiect: argumente, valoare returnată, durată, excepții (origine vs. propagare vs. tratată) + muchii de date (valoare returnată de A → argument al lui B) → `.flowmap/trace.json` |
+| Schelet static | `flowmap/static_map.py` (`ast`), `flowmap/php/static.php` (`token_get_all`) | module, clase, funcții, apeluri rezolvate după nume, puncte de intrare (`main`, `__main__`, `test_*`, decoratoare/atribute de rute, cod la nivel de fișier) → `.flowmap/static.json` |
+| Instrumentare | `flowmap/tracer.py` (`sys.monitoring`), `flowmap/php/runtime.php` (instrumentare la `include`) | fiecare apel din proiect: argumente, valoare returnată, durată, excepții (origine vs. propagare vs. tratată) + muchii de date (valoare returnată de A → argument al lui B) → `.flowmap/trace.json` |
 | Vizualizare + feliere | `flowmap/viewer/index.html` | graf pe fișiere, felierea unei tranzacții, felia inversă/directă a unui apel concret, axă temporală, cod sursă |
 
 Muchiile de date se deduc prin *amprentarea valorilor*: obiectele mutabile după identitate,
@@ -48,6 +48,27 @@ Sugestie de scurtătură (Preferences → Keyboard Shortcuts → JSON):
 ```json
 { "key": "ctrl+alt+f", "command": "simpleBrowser.show", "args": "http://127.0.0.1:8765" }
 ```
+
+## PHP
+
+Aceleași comenzi, cu un script `.php` în loc de `.py`:
+
+```bash
+cd examples/shop-php && python -m flowmap all --open main.php
+python -m flowmap run public/index.php          # sau vendor/bin/phpunit tests, orice script PHP
+```
+
+Cum funcționează: `flowmap run` pornește `php` cu `flowmap/php/bootstrap.php`, care înlocuiește stream wrapper-ul
+`file://` și rescrie, la `include`/`require`, fiecare funcție și metodă din proiect (nu din `vendor/`) într-o formă
+echivalentă care raportează intrarea, argumentele, valoarea returnată și excepțiile. Numerotarea liniilor nu se
+schimbă, deci mesajele de eroare și stack trace-urile rămân corecte. Nu e nevoie de Xdebug sau de altă extensie;
+OPcache e dezactivat pentru acel proces. Scheletul static vine din `token_get_all`. Formatul JSON e identic cu cel
+din Python, așa că vizualizatorul, felierea și `flowmap slice` funcționează neschimbate; un proiect poate conține
+ambele limbaje.
+
+Limitări PHP: închiderile (`function () {}`, `fn() =>`) și funcțiile care returnează prin referință (`function &f`)
+nu sunt trasate; generatoarele apar ca un singur apel; `$this` nu apare între argumente; fișierele sunt
+instrumentate în memorie, deci overhead-ul la prima includere e vizibil pe proiecte mari.
 
 ## Folosire din terminal
 
@@ -117,10 +138,11 @@ pip install -e ".[test]" && python -m pytest -q
 pip install playwright && python -m playwright install chromium
 ```
 
-41 de teste: tracer (arbore de apeluri, valori, excepții, generatoare/async, thread-uri, overflow, excluderea
+50 de teste: tracer (arbore de apeluri, valori, excepții, generatoare/async, thread-uri, overflow, excluderea
 bibliotecilor), schelet static (ambiguitate, fișiere cu erori de sintaxă, rute), feliere, CLI, server HTTP
-(inclusiv path traversal) și un test end-to-end în Chromium care verifică felierea în graf. CI rulează pe
-Linux, Windows și macOS cu Python 3.12 și 3.13.
+(inclusiv path traversal), PHP (schelet, tracer, cazuri-limită ale instrumentării, proiect mixt) și un test
+end-to-end în Chromium care verifică felierea în graf. CI rulează pe Linux, Windows și macOS cu Python 3.12 și 3.13
+și PHP 8 (preinstalat pe runner-e). Testele PHP se sar dacă `php` lipsește.
 
 ## Structură
 
@@ -129,12 +151,16 @@ flowmap/
   flowmap/
     __main__.py      CLI (static | run | slice | serve | all | init-vscode)
     tracer.py        sys.monitoring, amprente de valori, muchii de date
-    static_map.py    schelet ast
+    static_map.py    schelet ast (+ integrarea scheletului PHP)
+    php.py           lansează php pentru static.php / bootstrap.php
+    php/runtime.php  instrumentare la include (stream wrapper) + tracer PHP, același trace.json
+    php/bootstrap.php, php/static.php
     slicer.py        feliere dinamică (implementare de referință, oglindită în viewer)
     server.py        server HTTP local (/api/trace, /api/static, /api/source)
     viewer/index.html
     templates/tasks.json
   examples/shop/     proiect demo cu două defecte plantate
+  examples/shop-php/ același demo, în PHP
   tests/
   .github/workflows/ci.yml
 ```

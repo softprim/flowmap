@@ -319,21 +319,33 @@ def resolve_script(root: Path, target: str) -> Path | None:
     return None
 
 
+def locate_script(root: Path, target: str) -> Path | None:
+    """resolve_script + mesajele pentru utilizator (script lipsă, script în afara rădăcinii)."""
+    script = resolve_script(root, target)
+    if script is None:
+        tried = " sau ".join(dict.fromkeys(str(c) for c in (Path(target).resolve(), (root / target).resolve())))
+        print(f"[flowmap] nu găsesc scriptul {target} (am căutat {tried})", file=sys.stderr)
+        return None
+    if not script.is_relative_to(root):
+        print(f"[flowmap] atenție: scriptul {script} e în afara rădăcinii {root}; se trasează doar codul de sub rădăcină."
+              f" Dacă acesta e proiectul tău, rulează cu --root {script.parent}", file=sys.stderr)
+    return script
+
+
 def run_traced(root: Path, target: str, argv: list[str], as_module: bool, out: Path,
                max_calls: int = DEFAULT_MAX_CALLS) -> int:
-    """Rulează un script/modul sub tracer și scrie trace-ul la final (chiar și la excepție)."""
+    """Rulează un script/modul sub tracer și scrie trace-ul la final (chiar și la excepție).
+    Scripturile .php sunt delegate tracer-ului PHP (flowmap/php), care scrie același format."""
     import runpy
 
     root = root.resolve()
     if not as_module:
-        script = resolve_script(root, target)
+        script = locate_script(root, target)
         if script is None:
-            tried = " sau ".join(dict.fromkeys(str(c) for c in (Path(target).resolve(), (root / target).resolve())))
-            print(f"[flowmap] nu găsesc scriptul {target} (am căutat {tried})", file=sys.stderr)
             return 2
-        if not script.is_relative_to(root):
-            print(f"[flowmap] atenție: scriptul {script} e în afara rădăcinii {root}; se trasează doar codul de sub rădăcină."
-                  f" Dacă acesta e proiectul tău, rulează cu --root {script.parent}", file=sys.stderr)
+        if script.suffix.lower() in (".php", ".phtml"):
+            from .php import run_traced_php
+            return run_traced_php(root, script, argv, out, max_calls)
         target = str(script)
     if str(root) not in sys.path:
         sys.path.insert(0, str(root))

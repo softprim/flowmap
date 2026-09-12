@@ -1,6 +1,14 @@
 # Changelog
 
-## Nelansat
+## 0.2.0 — 2026-09-12
+
+- **Suport PHP** (8.0+, fără extensii): `flowmap run script.php` instrumentează la `include` funcțiile și metodele
+  proiectului printr-un stream wrapper (`flowmap/php/runtime.php`) și scrie același `trace.json` (versiunea 1):
+  argumente, valori returnate, durată, excepții (origine / propagată / tratată), muchii de date. Scheletul static
+  pentru PHP (`flowmap/php/static.php`, `token_get_all`): clase, funcții, apeluri, `require`/`use`, puncte de intrare
+  (`main`, teste PHPUnit, atribute de rute, cod la nivel de fișier). Vizualizatorul, felierea și `flowmap slice`
+  funcționează neschimbate; proiectele pot fi mixte. Demo: `examples/shop-php`. 9 teste noi.
+- Neacoperit în PHP: închiderile și funcțiile cu return prin referință nu sunt trasate; generatoarele apar ca un singur apel.
 
 Reparații găsite la revizia de cod și la rularea pe proiecte reale (tomli, attrs); formatul JSON (versiunea 1) rămâne neschimbat.
 

@@ -50,7 +50,7 @@ def main(argv: list[str] | None = None) -> int:
     s = sub.add_parser("static", parents=[common], help="extrage scheletul static (module, funcții, apeluri, puncte de intrare)")
 
     r = sub.add_parser("run", parents=[common], help="rulează un script sub tracer și salvează trace-ul")
-    r.add_argument("target", help="script.py (față de directorul curent) sau, cu -m, numele modulului (ex: -m pytest)")
+    r.add_argument("target", help="script.py sau script.php (față de directorul curent) sau, cu -m, numele modulului Python (ex: -m pytest)")
     r.add_argument("-m", dest="as_module", action="store_true", help="rulează ca modul")
     r.add_argument("--max-calls", type=int, default=None, help="limită de apeluri înregistrate (implicit 200000)")
     r.add_argument("args", nargs=argparse.REMAINDER, help="argumente pentru script (tot ce urmează după script)")
@@ -76,7 +76,7 @@ def main(argv: list[str] | None = None) -> int:
     root = Path(ns.root).resolve()
     out = (root / ns.out) if not Path(ns.out).is_absolute() else Path(ns.out)
 
-    if sys.version_info < (3, 12) and ns.cmd in ("run", "all"):
+    if sys.version_info < (3, 12) and ns.cmd in ("run", "all") and not ns.target.lower().endswith((".php", ".phtml")):
         print("[flowmap] tracer-ul necesită Python 3.12+ (sys.monitoring)", file=sys.stderr)
         return 2
 

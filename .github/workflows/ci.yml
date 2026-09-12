@@ -19,6 +19,7 @@ jobs:
         with:
           python-version: ${{ matrix.python }}
       - run: pip install -e ".[test]"
+      - run: php -v
       - name: Browser pentru testul de integrare al vizualizatorului (doar Ubuntu)
         if: runner.os == 'Linux'
         run: |
