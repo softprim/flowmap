@@ -1,0 +1,457 @@
+<!doctype html>
+<html lang="ro">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>flowmap</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/cytoscape/3.30.4/cytoscape.min.js"></script>
+<style>
+  :root {
+    --bg: #eef1f5;        /* hârtie de desen tehnic, rece */
+    --panel: #ffffff;
+    --ink: #1c2530;
+    --muted: #6b7684;
+    --rule: #d3d9e1;
+    --flow: #3457d5;      /* traseul datelor */
+    --flow-soft: #c9d3f5;
+    --call: #9aa5b4;      /* apeluri (structură) */
+    --err: #c8321f;
+    --warn: #c98a05;
+    --ok: #2c8a5a;
+    --sel: #111827;
+    --mono: ui-monospace, "Cascadia Code", "JetBrains Mono", Menlo, Consolas, monospace;
+    --sans: ui-sans-serif, system-ui, "Segoe UI", Roboto, sans-serif;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #1b1e23; --panel: #23272e; --ink: #e3e7ec; --muted: #8e98a5; --rule: #343a44;
+      --flow: #7b93ff; --flow-soft: #34407a; --call: #5c6674; --err: #ff6b57; --warn: #e0a72a; --ok: #4fc08a; --sel: #f1f5f9;
+    }
+  }
+  * { box-sizing: border-box; }
+  html, body { height: 100%; margin: 0; }
+  body { font: 13px/1.45 var(--sans); color: var(--ink); background: var(--bg);
+         display: grid; grid-template-rows: 44px 1fr 56px; grid-template-columns: 250px 1fr 340px;
+         grid-template-areas: "top top top" "left canvas right" "time time time"; }
+  header { grid-area: top; display: flex; align-items: center; gap: 14px; padding: 0 14px; border-bottom: 1px solid var(--rule); background: var(--panel); }
+  header h1 { font-size: 15px; font-weight: 600; margin: 0; letter-spacing: .01em; }
+  header .meta { color: var(--muted); font-family: var(--mono); font-size: 12px; }
+  header .spacer { flex: 1; }
+  .seg { display: inline-flex; border: 1px solid var(--rule); border-radius: 6px; overflow: hidden; }
+  .seg button { border: 0; background: transparent; color: var(--ink); padding: 5px 10px; cursor: pointer; font: inherit; }
+  .seg button[aria-pressed="true"] { background: var(--sel); color: var(--panel); }
+  label.chk { display: inline-flex; align-items: center; gap: 5px; color: var(--muted); cursor: pointer; }
+  select, button.plain { font: inherit; color: var(--ink); background: var(--panel); border: 1px solid var(--rule); border-radius: 6px; padding: 4px 8px; }
+  aside { background: var(--panel); overflow: auto; padding: 10px 0; }
+  #left { grid-area: left; border-right: 1px solid var(--rule); }
+  #right { grid-area: right; border-left: 1px solid var(--rule); }
+  aside h2 { font-size: 11px; font-weight: 600; color: var(--muted); margin: 10px 14px 6px; letter-spacing: .02em; }
+  .item { padding: 5px 14px; cursor: pointer; display: flex; gap: 8px; align-items: baseline; border-left: 3px solid transparent; }
+  .item:hover { background: color-mix(in srgb, var(--flow) 8%, transparent); }
+  .item.active { border-left-color: var(--flow); background: color-mix(in srgb, var(--flow) 12%, transparent); }
+  .item .name { font-family: var(--mono); font-size: 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; flex: 1; }
+  .item .n { color: var(--muted); font-size: 11px; }
+  .item.err .name::before { content: "✖ "; color: var(--err); }
+  .item.warn .name::before { content: "▲ "; color: var(--warn); }
+  #canvas { grid-area: canvas; position: relative; }
+  #cy { position: absolute; inset: 0; }
+  #legend { position: absolute; left: 12px; bottom: 12px; background: var(--panel); border: 1px solid var(--rule); border-radius: 8px; padding: 8px 12px; font-size: 11px; color: var(--muted); display: grid; grid-template-columns: auto auto; gap: 3px 14px; }
+  #legend i { display: inline-block; width: 22px; height: 0; border-top: 2px solid var(--call); vertical-align: middle; margin-right: 6px; }
+  #legend i.flow { border-top-color: var(--flow); border-top-style: dashed; }
+  #legend b { display: inline-block; width: 10px; height: 10px; border-radius: 50%; vertical-align: middle; margin-right: 6px; }
+  #empty { position: absolute; inset: 0; display: none; place-items: center; text-align: center; color: var(--muted); padding: 40px; }
+  #empty code { font-family: var(--mono); color: var(--ink); }
+  #right .card { padding: 6px 14px 10px; border-bottom: 1px solid var(--rule); }
+  #right .title { font-family: var(--mono); font-size: 13px; font-weight: 600; word-break: break-all; }
+  #right .path { color: var(--muted); font-family: var(--mono); font-size: 11px; }
+  .calls .call { padding: 6px 8px; margin: 6px 0; border: 1px solid var(--rule); border-radius: 6px; font-family: var(--mono); font-size: 11px; cursor: pointer; }
+  .calls .call:hover, .calls .call.active { border-color: var(--flow); }
+  .calls .call.err { border-color: var(--err); }
+  .calls .call .k { color: var(--muted); }
+  .calls .call .exc { color: var(--err); }
+  .calls .call .ret { color: var(--ok); }
+  pre.src { margin: 0; padding: 8px 10px; font: 11px/1.5 var(--mono); background: var(--bg); border-radius: 6px; overflow: auto; max-height: 260px; }
+  pre.src .hl { background: color-mix(in srgb, var(--flow) 18%, transparent); display: block; }
+  pre.src .ln { color: var(--muted); display: inline-block; width: 3ch; margin-right: 1ch; text-align: right; user-select: none; }
+  footer { grid-area: time; display: flex; align-items: center; gap: 12px; padding: 0 14px; border-top: 1px solid var(--rule); background: var(--panel); }
+  footer input[type=range] { flex: 1; accent-color: var(--flow); }
+  footer .t { font-family: var(--mono); font-size: 12px; color: var(--muted); min-width: 170px; }
+  .hint { color: var(--muted); padding: 6px 14px; font-size: 12px; }
+  @media (prefers-reduced-motion: reduce) { * { transition: none !important; } }
+</style>
+</head>
+<body>
+<header>
+  <h1>flowmap</h1>
+  <span class="meta" id="meta">se încarcă…</span>
+  <span class="spacer"></span>
+  <span class="seg" role="group" aria-label="mod">
+    <button id="mode-exec" aria-pressed="true">Execuție</button>
+    <button id="mode-static" aria-pressed="false">Structură</button>
+  </span>
+  <label class="chk"><input type="checkbox" id="opt-group" checked> grupare pe fișier</label>
+  <label class="chk"><input type="checkbox" id="opt-data" checked> muchii de date</label>
+  <select id="layout" title="algoritm de așezare">
+    <option value="breadthfirst">arbore</option>
+    <option value="columns">coloane pe fișier</option>
+    <option value="cose">forțe</option>
+    <option value="concentric">concentric</option>
+    <option value="grid">grilă</option>
+  </select>
+  <button class="plain" id="fit">Încadrează</button>
+  <button class="plain" id="reload" title="reîncarcă .flowmap/*.json">Reîncarcă</button>
+</header>
+
+<aside id="left">
+  <h2>Tranzacții (feliere dinamică)</h2>
+  <div id="tx"></div>
+  <h2>Excepții</h2>
+  <div id="exc"></div>
+  <h2>Puncte de intrare (static)</h2>
+  <div id="ep"></div>
+</aside>
+
+<div id="canvas">
+  <div id="cy"></div>
+  <div id="empty"></div>
+  <div id="legend">
+    <span><i></i>apel (a chemat pe)</span>
+    <span><b style="background:var(--err)"></b>a ridicat excepție</span>
+    <span><i class="flow"></i>date (valoare returnată → argument)</span>
+    <span><b style="background:var(--warn)"></b>a tratat o excepție</span>
+  </div>
+</div>
+
+<aside id="right">
+  <div class="hint">Alege o tranzacție din stânga pentru a izola traseul ei, sau un nod din graf pentru detalii. Click pe un apel concret → felia inversă (de unde vin datele).</div>
+  <div id="detail"></div>
+</aside>
+
+<footer>
+  <button class="plain" id="play">▶ Redă</button>
+  <input type="range" id="time" min="0" max="0" value="0">
+  <span class="t" id="tlabel"></span>
+</footer>
+
+<script>
+const $ = s => document.querySelector(s);
+const css = v => getComputedStyle(document.documentElement).getPropertyValue(v).trim();
+let trace = null, stat = null, cy = null;
+let fnCalls = new Map(), edgeIndex = new Map();   // liste mari ținute în afara datelor Cytoscape
+window.fm = { get cy() { return cy; }, get trace() { return trace; } }; // pentru teste
+let mode = "exec";
+let selection = { txId: null, callId: null, nodeId: null };
+let timeMax = 0, playing = null;
+
+// ---------- încărcare ----------
+async function load() {
+  const [t, s] = await Promise.all([
+    fetch("/api/trace").then(r => r.ok ? r.json() : null).catch(() => null),
+    fetch("/api/static").then(r => r.ok ? r.json() : null).catch(() => null),
+  ]);
+  trace = t && Array.isArray(t.calls) ? t : null; stat = s && Array.isArray(s.modules) ? s : null;
+  if (trace && trace.calls.length === 0) trace = null;
+  if (trace) trace.calls.forEach(c => c.dur = (c.t1 ?? c.t0) - c.t0);
+  const parts = [];
+  if (stat) parts.push(`${stat.functions.length} funcții în ${stat.modules.length} module`);
+  if (trace) parts.push(`${trace.calls.length} apeluri`, `${trace.calls.filter(c => c.exc && c.exc.origin).length} excepții` + (trace.overflow ? " · trace trunchiat" : ""));
+  $("#meta").textContent = parts.join(" · ") || "fără date";
+  if (!trace && mode === "exec" && stat) mode = "static";
+  buildSidebar();
+  render();
+}
+
+// ---------- grafuri ----------
+function fnKey(c) { return c.file + "::" + c.func; }
+
+function execElements() {
+  const nodes = new Map(), edges = new Map(), files = new Set();
+  const calls = trace.calls;
+  fnCalls = new Map(); edgeIndex = new Map();
+  for (const c of calls) {
+    const k = fnKey(c);
+    files.add(c.file);
+    let n = nodes.get(k);
+    if (!n) { nodes.set(k, n = { id: k, label: c.func, file: c.file, line: c.line, count: 0, err: 0, warn: 0, tmin: Infinity, dur: 0 }); fnCalls.set(k, []); }
+    n.count++; fnCalls.get(k).push(c.id); n.tmin = Math.min(n.tmin, c.id); n.dur += c.dur;
+    if (c.exc && c.exc.origin && !c.exc.handled) n.err++;
+    else if (c.exc && c.exc.handled) n.warn++;
+    if (c.parent != null) {
+      const p = calls[c.parent], ek = "c|" + fnKey(p) + "|" + k;
+      let e = edges.get(ek);
+      if (!e) { edges.set(ek, e = { id: ek, source: fnKey(p), target: k, kind: "call", count: 0, tmin: Infinity, err: 0 }); edgeIndex.set(ek, []); }
+      e.count++; e.tmin = Math.min(e.tmin, c.id); edgeIndex.get(ek).push(c.id); if (c.exc && !c.exc.handled) e.err++;
+    }
+  }
+  if ($("#opt-data").checked) for (const d of trace.data_edges) {
+    const a = fnKey(calls[d.from]), b = fnKey(calls[d.to]); if (a === b) continue;
+    const ek = "d|" + a + "|" + b + "|" + d.via;
+    let e = edges.get(ek);
+    if (!e) { edges.set(ek, e = { id: ek, source: a, target: b, kind: "data", via: d.via, count: 0, tmin: Infinity }); edgeIndex.set(ek, []); }
+    e.count++; e.tmin = Math.min(e.tmin, d.to); edgeIndex.get(ek).push([d.from, d.to]);
+  }
+  const els = [];
+  const group = $("#opt-group").checked;
+  if (group) for (const f of files) els.push({ data: { id: "file:" + f, label: f, kind: "file" } });
+  for (const n of nodes.values()) els.push({ data: { ...n, kind: "fn", parent: group ? "file:" + n.file : undefined } });
+  for (const e of edges.values()) els.push({ data: e });
+  return els;
+}
+
+function staticElements() {
+  const els = [], group = $("#opt-group").checked;
+  const executed = new Set(trace ? trace.calls.map(fnKey) : []);
+  const eps = new Set(stat.entry_points.map(e => e.file + "::" + e.qualname));
+  const withFns = new Set(stat.functions.map(f => f.file));
+  if (group) for (const m of stat.modules) if (withFns.has(m.file)) els.push({ data: { id: "file:" + m.file, label: m.file, kind: "file" } });
+  const ids = new Set();
+  for (const f of stat.functions) {
+    const id = f.file + "::" + f.qualname; ids.add(id);
+    els.push({ data: { id, label: f.qualname, file: f.file, line: f.line, kind: "fn", count: 0, err: 0, warn: 0,
+      covered: executed.size ? (executed.has(id) ? "yes" : "no") : "unknown", entry: eps.has(id), parent: group ? "file:" + f.file : undefined } });
+  }
+  for (const e of stat.call_edges) {
+    if (!ids.has(e.from) || !ids.has(e.to)) continue;
+    els.push({ data: { id: "s|" + e.from + "|" + e.to, source: e.from, target: e.to, kind: "call", ambiguous: e.ambiguous, count: 1 } });
+  }
+  return els;
+}
+
+function style() {
+  const ink = css("--ink"), muted = css("--muted"), panel = css("--panel"), flow = css("--flow"), call = css("--call"), err = css("--err"), warn = css("--warn"), bg = css("--bg"), rule = css("--rule");
+  return [
+    { selector: "node[kind='file']", style: { shape: "round-rectangle", "background-color": panel, "background-opacity": .6, "border-color": rule, "border-width": 1,
+        label: "data(label)", "font-family": css("--mono"), "font-size": 10, color: muted, "text-valign": "top", "text-halign": "center", "text-margin-y": -4, padding: 14 } },
+    { selector: "node[kind='fn']", style: { shape: "round-rectangle", width: "label", height: 26, padding: "6px", "background-color": panel, "border-width": 1.5, "border-color": ink,
+        label: "data(label)", "font-family": css("--mono"), "font-size": 11, color: ink, "text-valign": "center", "text-halign": "center", "text-wrap": "none" } },
+    { selector: "node[kind='fn'][count > 1]", style: { label: e => `${e.data("label")} ×${e.data("count")}` } },
+    { selector: "node[kind='fn'][err > 0]", style: { "border-color": err, "border-width": 2.5, "background-color": err, "background-opacity": .12 } },
+    { selector: "node[kind='fn'][warn > 0][err = 0]", style: { "border-color": warn, "border-width": 2 } },
+    { selector: "node[kind='fn'][covered = 'no']", style: { "border-style": "dashed", color: muted, "border-color": muted } },
+    { selector: "node[kind='fn'][?entry]", style: { "border-width": 2.5, "border-color": flow } },
+    { selector: "edge", style: { width: 1.4, "line-color": call, "target-arrow-color": call, "target-arrow-shape": "triangle", "arrow-scale": .8, "curve-style": "bezier" } },
+    { selector: "edge[count > 1]", style: { width: e => Math.min(1.2 + Math.log2(e.data("count")), 5), label: e => "×" + e.data("count"), "font-size": 9, color: muted, "text-rotation": "autorotate", "text-margin-y": -6 } },
+    { selector: "edge[kind='data']", style: { "line-color": flow, "target-arrow-color": flow, "line-style": "dashed", "line-dash-pattern": [6, 3], label: "data(via)", "font-size": 9, "font-family": css("--mono"), color: flow, "text-rotation": "autorotate", "text-margin-y": -7, "text-background-color": bg, "text-background-opacity": .9, "text-background-padding": 2 } },
+    { selector: "edge[err > 0]", style: { "line-color": err, "target-arrow-color": err } },
+    { selector: "edge[?ambiguous]", style: { "line-style": "dotted" } },
+    { selector: ".dim", style: { opacity: .12, "text-opacity": .2 } },
+    { selector: ".future", style: { opacity: .06, "text-opacity": 0 } },
+    { selector: ".focus", style: { "border-color": flow, "border-width": 3, "z-index": 10 } },
+    { selector: "edge.focus", style: { width: 3, "z-index": 10 } },
+    { selector: ":selected", style: { "overlay-color": flow, "overlay-opacity": .15, "overlay-padding": 4 } },
+  ];
+}
+
+function render() {
+  $("#mode-exec").setAttribute("aria-pressed", mode === "exec");
+  $("#mode-static").setAttribute("aria-pressed", mode === "static");
+  const empty = $("#empty");
+  if ((mode === "exec" && !trace) || (mode === "static" && !stat)) {
+    empty.style.display = "grid";
+    empty.innerHTML = mode === "exec"
+      ? `<div>Nu există <code>.flowmap/trace.json</code>.<br>Rulează <code>python -m flowmap run main.py</code> (sau task-ul VS Code „flowmap: rulează fișierul curent”), apoi Reîncarcă.</div>`
+      : `<div>Nu există <code>.flowmap/static.json</code>.<br>Rulează <code>python -m flowmap static</code>.</div>`;
+    if (cy) cy.destroy(), cy = null; return;
+  }
+  empty.style.display = "none";
+  $("#legend").innerHTML = mode === "exec"
+    ? `<span><i></i>apel (a chemat pe)</span><span><b style="background:var(--err)"></b>a ridicat excepție</span><span><i class="flow"></i>date (valoare returnată → argument)</span><span><b style="background:var(--warn)"></b>a tratat o excepție</span>`
+    : `<span><i></i>apel posibil (rezolvat după nume)</span><span><b style="background:var(--flow)"></b>punct de intrare</span><span><i style="border-top-style:dotted"></i>apel ambiguu (mai multe ținte)</span><span><b style="background:transparent;border:1.5px dashed var(--muted)"></b>neexecutat în trace</span>`;
+  const elements = mode === "exec" ? execElements() : staticElements();
+  if (cy) cy.destroy();
+  cy = cytoscape({ container: $("#cy"), elements, style: style(), minZoom: .1, maxZoom: 4 });
+  runLayout();
+  cy.on("tap", "node[kind='fn']", ev => selectNode(ev.target.id()));
+  cy.on("tap", ev => { if (ev.target === cy) { selection.nodeId = null; selection.callId = null; applyHighlight(); showDetail(null); } });
+  timeMax = trace ? trace.calls.length : 0;
+  $("#time").max = timeMax; $("#time").value = timeMax;
+  applyHighlight();
+}
+
+function runLayout() {
+  const name = $("#layout").value;
+  if (name === "columns") {           // swimlane determinist: o coloană per fișier, funcțiile în ordinea din sursă
+    const files = [...new Set(cy.nodes("[kind='fn']").map(n => n.data("file")))].sort();
+    const pos = {}; files.forEach((f, ci) => {
+      cy.nodes(`[kind='fn'][file = '${f}']`).sort((a, b) => a.data("line") - b.data("line")).forEach((n, ri) => { pos[n.id()] = { x: ci * 260, y: ri * 56 }; });
+    });
+    cy.layout({ name: "preset", positions: n => pos[n.id()] || { x: 0, y: 0 }, fit: true, padding: 24, animate: false }).run();
+    return;
+  }
+  const opts = { name, animate: false, padding: 24, fit: true, nodeDimensionsIncludeLabels: true };
+  if (name === "breadthfirst") Object.assign(opts, { directed: true, spacingFactor: 1.1, roots: cy.nodes("[kind='fn']").filter(n => n.incomers("edge[kind='call']").empty()) });
+  if (name === "cose") Object.assign(opts, { idealEdgeLength: 90, nodeRepulsion: 12000, randomize: true });
+  cy.layout(opts).run();
+}
+
+// ---------- felierea dinamică ----------
+function subtree(rootId) {         // toate apelurile din subarborele unei tranzacții
+  const out = new Set(); const calls = trace.calls;
+  for (let i = rootId; i < calls.length; i++) {
+    const c = calls[i];
+    if (i === rootId || (c.parent != null && out.has(c.parent))) out.add(i);
+  }
+  return out;
+}
+function backwardSlice(callId) {   // strămoși + producători de date, tranzitiv
+  const calls = trace.calls, prod = new Map();
+  for (const d of trace.data_edges) (prod.get(d.to) || prod.set(d.to, []).get(d.to)).push(d.from);
+  const out = new Set(), q = [callId];
+  while (q.length) {
+    const i = q.pop(); if (out.has(i)) continue; out.add(i);
+    const c = calls[i];
+    if (c.parent != null) q.push(c.parent);
+    for (const p of prod.get(i) || []) {            // producătorul, calculul din interiorul lui și strămoșii lui
+      q.push(p); for (const j of subtree(p)) q.push(j);
+      for (let j = calls[p].parent; j != null; j = calls[j].parent) if (!out.has(j)) q.push(j);
+    }
+  }
+  return out;
+}
+function forwardSlice(callId) {    // descendenți + consumatori de date, tranzitiv
+  const calls = trace.calls, cons = new Map();
+  for (const d of trace.data_edges) (cons.get(d.from) || cons.set(d.from, []).get(d.from)).push(d.to);
+  const out = new Set(), q = [callId];
+  while (q.length) {
+    const i = q.pop(); if (out.has(i)) continue; out.add(i);
+    for (const j of subtree(i)) out.add(j);
+    for (const k of cons.get(i) || []) q.push(k);
+  }
+  return out;
+}
+
+function applyHighlight() {
+  if (!cy) return;
+  cy.elements().removeClass("dim future focus");
+  const t = +$("#time").value;
+  $("#tlabel").textContent = trace ? (t >= timeMax ? `toate cele ${timeMax} apeluri` : `apelul ${t} / ${timeMax}` + (trace.calls[t] ? ` · ${trace.calls[t].func} @ ${trace.calls[t].t0} ms` : "")) : "";
+  if (mode !== "exec") return;
+  let keep = null;
+  if (selection.callId != null) keep = new Set([...backwardSlice(selection.callId), ...forwardSlice(selection.callId)]);
+  else if (selection.txId != null) keep = subtree(selection.txId);
+  if (keep) {
+    const fnIds = new Set([...keep].map(i => fnKey(trace.calls[i])));
+    cy.nodes("[kind='fn']").forEach(n => { if (!fnIds.has(n.id())) n.addClass("dim"); });
+    cy.edges().forEach(e => {
+      const d = e.data();
+      const idx = edgeIndex.get(d.id) || [];
+      const ok = d.kind === "call"
+        ? idx.some(i => keep.has(i) && keep.has(trace.calls[i].parent))
+        : idx.some(([a, b]) => keep.has(a) && keep.has(b));
+      if (!ok) e.addClass("dim");
+    });
+    cy.nodes("[kind='file']").forEach(f => { if (f.children().not(".dim").empty()) f.addClass("dim"); });
+  }
+  if (t < timeMax) {                 // axa temporală: primul moment în care nodul/muchia apare în selecția curentă
+    const calls = trace.calls, ids = keep ? [...keep].sort((a, b) => a - b) : calls.map(c => c.id);
+    const firstNode = new Map(), firstEdge = new Map();
+    for (const i of ids) {
+      const c = calls[i], k = fnKey(c);
+      if (!firstNode.has(k)) firstNode.set(k, i);
+      if (c.parent != null) { const ek = "c|" + fnKey(calls[c.parent]) + "|" + k; if (!firstEdge.has(ek)) firstEdge.set(ek, i); }
+    }
+    for (const d of trace.data_edges) if (!keep || (keep.has(d.from) && keep.has(d.to))) {
+      const ek = "d|" + fnKey(calls[d.from]) + "|" + fnKey(calls[d.to]) + "|" + d.via; if (!firstEdge.has(ek)) firstEdge.set(ek, d.to);
+    }
+    cy.nodes("[kind='fn']").forEach(n => { if ((firstNode.get(n.id()) ?? Infinity) > t) n.addClass("future"); });
+    cy.edges().forEach(e => { if ((firstEdge.get(e.id()) ?? Infinity) > t) e.addClass("future"); });
+  }
+  if (selection.nodeId) cy.getElementById(selection.nodeId).addClass("focus");
+  if (selection.callId != null) cy.getElementById(fnKey(trace.calls[selection.callId])).addClass("focus");
+}
+
+// ---------- panouri ----------
+function buildSidebar() {
+  const tx = $("#tx"), ex = $("#exc"), ep = $("#ep");
+  tx.innerHTML = ex.innerHTML = ep.innerHTML = "";
+  if (trace) {
+    const calls = trace.calls;
+    const roots = calls.filter(c => c.parent == null);
+    const items = [];
+    for (const r of roots) {
+      const kids = calls.filter(c => c.parent === r.id);
+      items.push(r); if (roots.length === 1 && kids.length > 1) items.push(...kids);
+    }
+    tx.appendChild(row("toate", "", () => { selection = { txId: null, callId: null, nodeId: null }; markActive(tx, null); applyHighlight(); showDetail(null); }, "tx-all"));
+    for (const c of items) {
+      const arg = Object.entries(c.args).filter(([k]) => k !== "self").map(([, v]) => v).slice(0, 2).join(", ");
+      const el = row(`${c.func}(${arg})`, `${subtree(c.id).size}`, () => { selection = { txId: c.id, callId: null, nodeId: null }; markActive(tx, el); applyHighlight(); showDetail(null); }, "tx-" + c.id);
+      if (c.exc && !c.exc.handled) el.classList.add("err"); else if (c.exc) el.classList.add("warn");
+      tx.appendChild(el);
+    }
+    for (const c of calls.filter(c => c.exc && c.exc.origin)) {
+      const el = row(`${c.exc.type} în ${c.func}`, c.exc.handled ? "tratată" : "#" + c.id, () => { selection = { txId: null, callId: c.id, nodeId: fnKey(c) }; markActive(tx, null); applyHighlight(); showDetail(fnKey(c), c.id); }, "exc-" + c.id);
+      el.classList.add(c.exc.handled ? "warn" : "err"); el.title = c.exc.msg; ex.appendChild(el);
+    }
+    if (!ex.children.length) ex.innerHTML = `<div class="hint">nicio excepție</div>`;
+  } else tx.innerHTML = ex.innerHTML = `<div class="hint">fără trace</div>`;
+  if (stat) for (const e of stat.entry_points) {
+    const el = row(e.qualname === "<module>" ? e.file : e.qualname, e.reason, () => { if (mode !== "static") { mode = "static"; render(); } const n = cy.getElementById(e.file + "::" + e.qualname); if (n.nonempty()) { cy.animate({ center: { eles: n }, zoom: 1.5 }, { duration: 300 }); selectNode(n.id()); } });
+    el.title = e.file; ep.appendChild(el);
+  } else ep.innerHTML = `<div class="hint">fără schelet static</div>`;
+}
+function row(name, n, onclick, id) {
+  const el = document.createElement("div"); el.className = "item"; el.id = id;
+  el.innerHTML = `<span class="name"></span><span class="n"></span>`;
+  el.querySelector(".name").textContent = name; el.querySelector(".n").textContent = n;
+  el.addEventListener("click", onclick); return el;
+}
+function markActive(container, el) { container.querySelectorAll(".item").forEach(i => i.classList.remove("active")); if (el) el.classList.add("active"); }
+
+function selectNode(id) { selection.nodeId = id; selection.callId = null; applyHighlight(); showDetail(id); }
+
+async function showDetail(nodeId, callId) {
+  const d = $("#detail"); d.innerHTML = "";
+  if (!nodeId) return;
+  const n = cy.getElementById(nodeId).data();
+  const card = document.createElement("div"); card.className = "card";
+  card.innerHTML = `<div class="title"></div><div class="path"></div>`;
+  card.querySelector(".title").textContent = n.label; card.querySelector(".path").textContent = `${n.file}:${n.line}`;
+  d.appendChild(card);
+  const list = fnCalls.get(nodeId);
+  if (trace && list && list.length) {
+    const c2 = document.createElement("div"); c2.className = "card calls";
+    c2.innerHTML = `<div class="path">${list.length} apel${list.length > 1 ? "uri" : ""} · ${n.dur.toFixed(2)} ms în total${list.length > 200 ? " · afișez primele 200" : ""}. Click pe un apel → felia lui (de unde vin datele, unde ajung).</div>`;
+    for (const i of list.slice(0, 200)) {
+      const c = trace.calls[i], el = document.createElement("div"); el.className = "call" + (c.exc && c.exc.origin && !c.exc.handled ? " err" : "") + (i === callId ? " active" : "");
+      const args = Object.entries(c.args).filter(([k]) => k !== "self").map(([k, v]) => `${k}=${v}`).join(", ");
+      el.innerHTML = `<div><span class="k">#${c.id}</span> (${esc(args)}) <span class="k">${c.dur.toFixed(2)} ms</span></div>` +
+        (c.exc ? `<div class="exc">${c.exc.origin ? "ridică" : "propagă"} ${esc(c.exc.type)}: ${esc(c.exc.msg)}${c.exc.handled ? " (tratată aici)" : ""}</div>` : `<div class="ret">→ ${esc(c.ret)}</div>`);
+      el.addEventListener("click", () => { selection = { txId: null, callId: i, nodeId }; markActive($("#tx"), null); applyHighlight(); showDetail(nodeId, i); });
+      c2.appendChild(el);
+    }
+    d.appendChild(c2);
+  }
+  // sursa
+  try {
+    const src = await fetch("/api/source?file=" + encodeURIComponent(n.file)).then(r => r.ok ? r.text() : null);
+    if (src) {
+      const lines = src.split("\n"), from = Math.max(0, n.line - 3), fnDef = (stat?.functions || []).find(f => f.file === n.file && f.qualname === n.label);
+      const to = Math.min(lines.length, fnDef?.end_line ?? n.line + 14);
+      const pre = document.createElement("pre"); pre.className = "src";
+      pre.innerHTML = lines.slice(from, to).map((l, i) => { const ln = from + i + 1; return `<span class="${ln === n.line ? "hl" : ""}"><span class="ln">${ln}</span>${esc(l)}</span>`; }).join("\n");
+      const c3 = document.createElement("div"); c3.className = "card"; c3.appendChild(pre); d.appendChild(c3);
+    }
+  } catch {}
+}
+const esc = s => String(s ?? "").replace(/[&<>]/g, ch => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;" }[ch]));
+
+// ---------- controale ----------
+$("#mode-exec").onclick = () => { mode = "exec"; $("#layout").value = "breadthfirst"; render(); };
+$("#mode-static").onclick = () => { mode = "static"; $("#layout").value = "columns"; render(); };
+$("#opt-group").onchange = $("#opt-data").onchange = () => render();
+$("#layout").onchange = () => runLayout();
+$("#fit").onclick = () => cy && cy.fit(24);
+$("#reload").onclick = load;
+$("#time").oninput = applyHighlight;
+$("#play").onclick = () => {
+  if (playing) { clearInterval(playing); playing = null; $("#play").textContent = "▶ Redă"; return; }
+  const r = $("#time"); if (+r.value >= timeMax) r.value = 0;
+  $("#play").textContent = "❚❚ Pauză";
+  playing = setInterval(() => { r.value = +r.value + 1; applyHighlight(); if (+r.value >= timeMax) $("#play").click(); }, Math.max(40, 6000 / Math.max(timeMax, 1)));
+};
+window.addEventListener("keydown", e => { if (e.key === "Escape") { selection = { txId: null, callId: null, nodeId: null }; markActive($("#tx"), null); applyHighlight(); showDetail(null); } });
+load();
+</script>
+</body>
+</html>

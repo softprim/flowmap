@@ -1,0 +1,42 @@
+{
+  "version": "2.0.0",
+  "tasks": [
+    {
+      "label": "flowmap: schelet static",
+      "type": "shell",
+      "command": "${command:python.interpreterPath} -m flowmap --root \"${workspaceFolder}\" static",
+      "problemMatcher": [],
+      "presentation": { "reveal": "silent", "panel": "shared" }
+    },
+    {
+      "label": "flowmap: rulează fișierul curent",
+      "type": "shell",
+      "command": "${command:python.interpreterPath} -m flowmap --root \"${workspaceFolder}\" run \"${relativeFile}\"",
+      "dependsOn": ["flowmap: schelet static"],
+      "problemMatcher": [],
+      "presentation": { "reveal": "always", "panel": "shared", "clear": true },
+      "group": { "kind": "build", "isDefault": true }
+    },
+    {
+      "label": "flowmap: rulează testele (pytest)",
+      "type": "shell",
+      "command": "${command:python.interpreterPath} -m flowmap --root \"${workspaceFolder}\" run -m pytest -q",
+      "dependsOn": ["flowmap: schelet static"],
+      "problemMatcher": [],
+      "presentation": { "reveal": "always", "panel": "shared", "clear": true }
+    },
+    {
+      "label": "flowmap: vizualizator (http://127.0.0.1:8765)",
+      "type": "shell",
+      "command": "${command:python.interpreterPath} -m flowmap --root \"${workspaceFolder}\" serve --port 8765",
+      "isBackground": true,
+      "problemMatcher": {
+        "owner": "flowmap",
+        "pattern": { "regexp": "^$" },
+        "background": { "activeOnStart": true, "beginsPattern": "^\\[flowmap\\] vizualizator", "endsPattern": "^\\[flowmap\\] vizualizator" }
+      },
+      "presentation": { "reveal": "silent", "panel": "dedicated" },
+      "runOptions": { "runOn": "folderOpen" }
+    }
+  ]
+}
