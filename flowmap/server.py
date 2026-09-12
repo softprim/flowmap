@@ -58,7 +58,8 @@ def make_handler(data_dir: Path):
                 return self._send(f.read_bytes(), "application/json; charset=utf-8")
             if path == "/api/source":
                 rel = parse_qs(urlsplit(self.path).query).get("file", [""])[0]
-                root = Path(json.loads((data_dir / "static.json").read_text())["root"]) if (data_dir / "static.json").exists() else data_dir.parent
+                static = data_dir / "static.json"   # encoding explicit: pe Windows implicitul e cp1252 și rădăcina cu diacritice s-ar strica
+                root = Path(json.loads(static.read_text(encoding="utf-8"))["root"]) if static.exists() else data_dir.parent
                 target = (root / rel).resolve()
                 if not rel or not target.is_relative_to(root.resolve()) or not target.is_file():
                     return self._send(b"not found", "text/plain", 404)

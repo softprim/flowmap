@@ -13,7 +13,7 @@ from tests.conftest import run_cli
 def test_cli_help_and_missing_script(tmp_path):
     assert run_cli("--help").returncode == 0
     r = run_cli("--root", str(tmp_path), "run", "nope.py")
-    assert r.returncode == 2 and "nu găsesc" in r.stderr
+    assert r.returncode == 2 and "scriptul" in r.stderr and "nope.py" in r.stderr  # fără diacritice: pe Windows stderr le scrie ca \\uXXXX
 
 
 def test_cli_pytest_mode(shop):
@@ -88,13 +88,24 @@ def test_serve_invalid_port_exit_code(shop):
     assert r.returncode == 1 and "nu pot porni" in r.stderr
 
 
-def test_cli_slice_survives_cp1252_stdout(shop):
-    """Pe Windows, stdout redirecționat (task VS Code, CI) e cp1252; valorile trasate conțin diacritice."""
+def test_cli_survives_cp1252_stdout(shop, tmp_path):
+    """Pe Windows, stdout redirecționat (task VS Code, CI) e cp1252: textul --help, valorile trasate din `slice`
+    și print-urile programului trasat conțin diacritice; niciunul nu are voie să crape."""
     import os
-    r = subprocess.run([sys.executable, "-m", "flowmap", "--root", str(shop), "slice", "26", "--direction", "backward"],
-                       capture_output=True, text=True, encoding="cp1252", env={**os.environ, "PYTHONIOENCODING": "cp1252"})
+    import shutil
+    from tests.conftest import SHOP
+    env = {**os.environ, "PYTHONIOENCODING": "cp1252"}
+    cli = lambda *a: subprocess.run([sys.executable, "-m", "flowmap", *a], capture_output=True, text=True, encoding="cp1252", env=env)
+    r = cli("--help")
+    assert r.returncode == 0 and "flowmap" in r.stdout, r.stderr
+    r = cli("--root", str(shop), "slice", "26", "--direction", "backward")
     assert r.returncode == 0, r.stderr
     assert "apply_discount(total=18.5, code='FIX50') -> -31.5" in r.stdout and "AssertionError" in r.stdout
+    root = tmp_path / "shop"
+    shutil.copytree(SHOP, root, ignore=shutil.ignore_patterns(".flowmap*", "__pycache__"))
+    r = cli("--root", str(root), "run", "main.py")   # main.py afișează „factură” pe stdout
+    assert r.returncode == 0 and "32 apeluri" in r.stderr, r.stderr
+    assert "FAIL Bogdan" in r.stdout
 
 
 def test_paths_with_spaces_and_diacritics(tmp_path):

@@ -6,7 +6,18 @@ import sys
 from pathlib import Path
 
 
+def _tolerant_stdio():
+    """Windows: stdout/stderr redirecționate (task VS Code, CI, pipe) folosesc cp1252, iar textele CLI-ului,
+    valorile trasate și ieșirea programului trasat conțin diacritice. Nu schimbăm codificarea, doar nu mai crăpăm."""
+    for stream in (sys.stdout, sys.stderr):
+        try:
+            stream.reconfigure(errors="backslashreplace")
+        except (AttributeError, ValueError):
+            pass
+
+
 def main(argv: list[str] | None = None) -> int:
+    _tolerant_stdio()
     p = argparse.ArgumentParser(prog="flowmap", description="Hartă vizuală a execuției și a fluxului de date (Python 3.12+)")
     from . import __version__
     p.add_argument("--version", action="version", version=f"flowmap {__version__}")
@@ -81,10 +92,6 @@ def main(argv: list[str] | None = None) -> int:
             print(f"[flowmap] id de apel invalid (trace-ul are {len(t['calls'])} apeluri)", file=sys.stderr)
             return 2
         fn = {"backward": slicer.backward_slice, "forward": slicer.forward_slice, "both": slicer.full_slice}[ns.direction]
-        try:  # Windows: stdout redirecționat e cp1252 și ar crăpa pe diacriticele din valorile trasate
-            sys.stdout.reconfigure(errors="backslashreplace")
-        except (AttributeError, ValueError):
-            pass
         print(slicer.describe(t, fn(t, ns.call_id)))
         return 0
 
