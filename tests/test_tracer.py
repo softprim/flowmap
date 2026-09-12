@@ -192,3 +192,86 @@ def test_sibling_directory_with_same_prefix_is_excluded(tmp_path):
     """)
     _, t = _run(root)
     assert {c["func"] for c in t["calls"]} == {"inside"}
+
+
+def test_generator_throw_and_close_keep_stack_balanced(tmp_path):
+    """gen.throw()/close() (contextmanager, `break` dintr-un for) reiau generatorul cu o excepție (PY_THROW).
+    Fără segmentul corespunzător, PY_UNWIND scotea din stivă înregistrarea altui apel și corupea părinții."""
+    root = _project(tmp_path, """
+        from contextlib import contextmanager
+        @contextmanager
+        def managed():
+            yield "res"
+        def inner(): raise ValueError("boom")
+        def use_cm():
+            try:
+                with managed():
+                    inner()
+            except ValueError:
+                pass
+        def gen():
+            try:
+                yield 1
+                yield 2
+            finally:
+                pass
+        def early_break():
+            for x in gen():
+                break
+        def explicit_throw():
+            g = gen(); next(g)
+            try:
+                g.throw(KeyError("k"))
+            except KeyError:
+                pass
+        def after(): return 1
+        def main():
+            use_cm(); after(); early_break(); after(); explicit_throw(); after()
+        main()
+    """)
+    code, t = _run(root)
+    assert code == 0
+    calls = t["calls"]
+    main = calls[0]
+    assert main["func"] == "main" and main["parent"] is None and main["exc"] is None
+    # toate apelurile de nivel 1 au părintele main; niciun apel nu rămâne orfan
+    assert [c["func"] for c in calls if c["parent"] == 0] == ["use_cm", "after", "early_break", "after", "explicit_throw", "after"]
+    assert all(c["parent"] == 0 or c["parent"] is None or calls[c["parent"]]["parent"] is not None or calls[c["parent"]]["func"] == "main" for c in calls)
+    use_cm = next(c for c in calls if c["func"] == "use_cm")
+    assert use_cm["exc"]["type"] == "ValueError" and use_cm["exc"]["origin"] is False and use_cm["exc"]["handled"] is True
+    managed = [c for c in calls if c["func"] == "managed"]
+    assert [m["ret"] for m in managed] == ["'res'", None]            # segmentul yield + segmentul throw
+    assert managed[1]["exc"]["type"] == "ValueError" and managed[1]["exc"]["origin"] is False
+    eb = next(c for c in calls if c["func"] == "early_break")
+    assert eb["exc"] is None                                          # GeneratorExit de la close() nu e o eroare
+    assert all(c["exc"] is None or c["exc"]["type"] != "GeneratorExit" for c in calls)
+    gens = [c for c in calls if c["func"] == "gen" and c["parent"] == eb["id"]]
+    assert gens and gens[0]["ret"] == "1"
+    thrown = [c for c in calls if c["func"] == "gen" and calls[c["parent"]]["func"] == "explicit_throw"]
+    assert thrown[-1]["exc"]["type"] == "KeyError"
+    assert all(c["t1"] is not None for c in calls)
+
+
+def test_tracer_survives_missing_sys_getframe(tmp_path):
+    """attrs are un test care face `monkeypatch.delattr(sys, "_getframe")`; tracer-ul nu are voie să crape."""
+    root = _project(tmp_path, """
+        import sys
+        def leaf(x): return x + 1
+        def main():
+            del sys._getframe
+            return leaf(1)
+        main()
+    """)
+    from tests.conftest import run_cli
+    r = run_cli("--root", str(root), "run", "app.py")  # în subproces: scriptul strică sys-ul procesului în care rulează
+    assert r.returncode == 0, r.stderr
+    t = json.loads((root / ".flowmap" / "trace.json").read_text(encoding="utf-8"))
+    assert [(c["func"], c["parent"]) for c in t["calls"]] == [("main", None), ("leaf", 0)]
+    assert t["calls"][1]["args"] == {"x": "1"}
+
+
+def test_fingerprint_survives_broken_hash():
+    class H:
+        def __hash__(self):
+            raise ValueError("no hash")
+    assert _fingerprint((H(),)).startswith("o:")

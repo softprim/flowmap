@@ -27,6 +27,8 @@ from pathlib import Path
 from typing import Any
 
 TRACE_VERSION = 1
+# legat la import: programul trasat poate șterge sys._getframe (attrs are un test care face exact asta)
+_getframe = sys._getframe
 _PKG_DIR = str(Path(__file__).resolve().parent)
 MAX_REPR = 120
 DEFAULT_MAX_CALLS = 200_000    # protecție împotriva exploziei de trace
@@ -65,7 +67,7 @@ def _fingerprint(value: Any) -> str | None:
     if isinstance(value, _IMMUTABLE):
         try:
             return f"{type(value).__name__}:{hash(value)}"
-        except TypeError:  # tuple cu conținut nehashabil
+        except Exception:  # noqa: BLE001  tuple cu conținut nehashabil sau __hash__ care aruncă orice
             return f"o:{id(value)}"
     return f"o:{id(value)}"
 
@@ -139,12 +141,21 @@ class Tracer:
     def _on_start(self, code, instruction_offset):
         if not self._in_project(code):
             return sys.monitoring.DISABLE
+        self._push(code, _getframe(1).f_locals)
+        return None
+
+    def _on_throw(self, code, instruction_offset, exception):
+        # gen.throw()/close(), contextmanager.__exit__, anulare asyncio: generatorul e reluat cu o excepție.
+        # Fără acest segment, PY_UNWIND-ul care urmează ar scoate din stivă înregistrarea altui apel.
+        if self._in_project(code):  # PY_THROW nu poate fi dezactivat local
+            self._push(code, _getframe(1).f_locals)
+
+    def _push(self, code, f_locals):
         if self.overflow:
-            return None
+            return
         rel, names = self._meta(code)
         args: dict[str, str] = {}
         fps: dict[str, str] = {}
-        f_locals = sys._getframe(1).f_locals
         for name in names:
             if name not in f_locals:
                 continue
@@ -158,7 +169,7 @@ class Tracer:
             if len(self.calls) >= self.max_calls:
                 self.overflow = True
                 self._disable()
-                return None
+                return
             cid = len(self.calls)
             self.calls.append({
                 "id": cid,
@@ -176,7 +187,6 @@ class Tracer:
                 "exc": None,
             })
         stack.append(cid)
-        return None
 
     def _pop(self) -> dict[str, Any] | None:
         stack = self._stack
@@ -202,7 +212,7 @@ class Tracer:
         if not self._in_project(code):  # PY_UNWIND/RAISE nu pot fi dezactivate local
             return
         rec = self._pop()
-        if rec is None:
+        if rec is None or isinstance(exception, GeneratorExit):  # close() pe un generator nu e o eroare
             return
         if rec["exc"] is None:  # propagată dintr-un apel copil, nu ridicată aici
             rec["exc"] = {"type": type(exception).__name__, "msg": _safe_repr(str(exception)), "origin": False}
@@ -218,7 +228,7 @@ class Tracer:
         origin = not getattr(exception, "_flowmap_seen", False)
         try:
             exception._flowmap_seen = True
-        except AttributeError:
+        except Exception:  # noqa: BLE001  __slots__, __setattr__ personalizat
             pass
         if rec["exc"] is None:
             rec["exc"] = {"type": type(exception).__name__, "msg": _safe_repr(str(exception)), "origin": origin}
@@ -244,7 +254,8 @@ class Tracer:
         # generatoare / corutine: fiecare segment între resume și yield devine un apel separat
         mon.register_callback(tid, E.PY_RESUME, self._on_start)
         mon.register_callback(tid, E.PY_YIELD, self._on_return)
-        mon.set_events(tid, E.PY_START | E.PY_RETURN | E.PY_UNWIND | E.RAISE | E.PY_RESUME | E.PY_YIELD)
+        mon.register_callback(tid, E.PY_THROW, self._on_throw)
+        mon.set_events(tid, E.PY_START | E.PY_RETURN | E.PY_UNWIND | E.RAISE | E.PY_RESUME | E.PY_YIELD | E.PY_THROW)
 
     def _disable(self):
         if self._tool_id is not None:

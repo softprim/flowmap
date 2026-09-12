@@ -28,15 +28,16 @@ def _iter_py_files(root: Path):
 
 
 class _Collector(ast.NodeVisitor):
-    def __init__(self, rel: str, module: str):
+    def __init__(self, rel: str, module: str, is_package: bool = False):
         self.rel = rel
         self.module = module
+        self.package = module if is_package else module.rpartition(".")[0]  # pachetul în care se rezolvă `from . import`
         self.scope: list[str] = []
         self.kinds: list[str] = []   # "class" / "function", paralel cu scope
         self.functions: list[dict[str, Any]] = []
         self.classes: list[dict[str, Any]] = []
         self.calls: list[tuple[str, str, int]] = []   # (caller qualname, callee name, line)
-        self.imports: list[str] = []
+        self.imports: list[tuple[str, bool]] = []   # (modul, doar-potrivire-exactă)
         self.entry_points: list[dict[str, Any]] = []
 
     def _qual(self, name: str) -> str:
@@ -44,11 +45,22 @@ class _Collector(ast.NodeVisitor):
 
     def visit_Import(self, node):
         for a in node.names:
-            self.imports.append(a.name)
+            self.imports.append((a.name, False))
 
     def visit_ImportFrom(self, node):
+        if not node.level:
+            if node.module:
+                self.imports.append((node.module, False))
+            return
+        # import relativ: rezolvat față de pachetul modulului curent (`.x` în shop/orders.py -> shop.x)
+        base = self.package
+        for _ in range(node.level - 1):
+            base = base.rpartition(".")[0]
         if node.module:
-            self.imports.append(("." * node.level) + node.module)
+            self.imports.append((f"{base}.{node.module}" if base else node.module, False))
+        else:  # `from . import a, b`: a și b sunt submodule doar dacă există ca module în proiect
+            self.imports.append((base, False))
+            self.imports.extend((f"{base}.{a.name}" if base else a.name, True) for a in node.names)
 
     def visit_ClassDef(self, node):
         q = self._qual(node.name)
@@ -112,13 +124,18 @@ def build_static(root: Path) -> dict[str, Any]:
     for path in _iter_py_files(root):
         rel = str(path.relative_to(root))
         rel = rel.replace("\\", "/")
+        is_package = path.name == "__init__.py"
         modname = rel[:-3].replace("/", ".").removesuffix(".__init__")
         try:
-            tree = ast.parse(path.read_text(encoding="utf-8", errors="replace"), filename=rel)
-        except (SyntaxError, UnicodeDecodeError) as e:
-            modules.append({"file": rel, "module": modname, "error": str(e)})
-            continue
-        c = _Collector(rel, modname)
+            # ca octeți: `ast` respectă BOM-ul UTF-8 și cookie-ul `# -*- coding: ... -*-`, exact ca interpretorul
+            tree = ast.parse(path.read_bytes(), filename=rel)
+        except (SyntaxError, ValueError):
+            try:  # codificare invalidă fără cookie: decodăm cu înlocuire ca să nu pierdem tot fișierul
+                tree = ast.parse(path.read_text(encoding="utf-8", errors="replace"), filename=rel)
+            except (SyntaxError, ValueError) as e:
+                modules.append({"file": rel, "module": modname, "error": str(e)})
+                continue
+        c = _Collector(rel, modname, is_package)
         c.visit(tree)
         modules.append({"file": rel, "module": modname, "lines": len(tree.body)})
         for fn in c.functions:
@@ -129,8 +146,8 @@ def build_static(root: Path) -> dict[str, Any]:
             raw_calls.append({"file": rel, "caller": caller, "callee": callee, "line": line})
         for ep in c.entry_points:
             entry_points.append({**ep, "file": rel})
-        for imp in c.imports:
-            imports.append({"from": modname, "to": imp})
+        for imp, exact in c.imports:
+            imports.append({"from": modname, "to": imp, "exact": exact})
 
     # rezoluție euristică a apelurilor după numele simplu al funcției
     by_name: dict[str, list[str]] = {}
@@ -152,7 +169,8 @@ def build_static(root: Path) -> dict[str, Any]:
             call_edges.append({"from": f'{rc["file"]}::{rc["caller"]}', "to": t, "line": rc["line"], "ambiguous": len(same or targets) > 1})
 
     project_mods = {m["module"] for m in modules}
-    import_edges = [e for e in imports if e["to"].lstrip(".") in project_mods or any(e["to"].lstrip(".").startswith(m + ".") for m in project_mods)]
+    import_edges = [{"from": e["from"], "to": e["to"]} for e in imports if e["from"] != e["to"]
+                    and (e["to"] in project_mods or (not e["exact"] and any(e["to"].startswith(m + ".") for m in project_mods)))]
 
     return {
         "version": 1,

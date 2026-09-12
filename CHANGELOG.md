@@ -1,5 +1,23 @@
 # Changelog
 
+## Nelansat
+
+Reparații găsite la revizia de cod și la rularea pe proiecte reale (tomli, attrs); formatul JSON (versiunea 1) rămâne neschimbat.
+
+- Tracer: se înregistrează și `PY_THROW` (`gen.throw()`/`close()`, `contextmanager.__exit__`, anulare asyncio).
+  Fără el, `PY_UNWIND` scotea din stivă înregistrarea altui apel și corupea părinții apelurilor următoare;
+  `GeneratorExit` de la `close()` nu mai apare ca excepție.
+- Tracer: `sys._getframe` e legat la import (attrs are un test care îl șterge din `sys`); un `__hash__` sau
+  `__setattr__` care aruncă orice excepție nu mai poate crăpa callback-urile.
+- Schelet static: fișierele sunt parsate ca octeți (BOM UTF-8 și `# -*- coding: ... -*-` acceptate ca de interpretor);
+  importurile relative (`from .x import`, `from . import x`) sunt rezolvate față de pachet și apar în `import_edges`.
+- Server: handler-ul derivă din `BaseHTTPRequestHandler` (cel vechi servea `HEAD`/fișiere din directorul curent);
+  cererile cu alt `Host` decât `127.0.0.1`/`localhost` primesc 403 (apărare contra DNS rebinding);
+  portul invalid nu mai lasă un traceback, iar codul de ieșire al lui `serve`/`all` reflectă eroarea.
+- CLI: `flowmap slice` nu mai crapă pe Windows când stdout e redirecționat (cp1252) și valorile conțin diacritice.
+- 10 teste noi: stivă echilibrată la throw/close, `sys._getframe` lipsă, BOM/cookie de codificare, importuri relative,
+  `Host` străin și `HEAD`, port invalid, stdout cp1252, căi cu spații și diacritice, proiect fără funcții / trace gol.
+
 ## 0.1.0 — 2026-09-12
 
 Prima versiune stabilă.

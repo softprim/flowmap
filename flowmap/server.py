@@ -5,14 +5,27 @@ import json
 import sys
 import webbrowser
 from urllib.parse import parse_qs, urlsplit
-from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
 VIEWER = Path(__file__).parent / "viewer" / "index.html"
+_LOCAL_HOSTS = {"127.0.0.1", "localhost", "[::1]", "::1"}
+
+
+def _is_local_host(host: str | None) -> bool:
+    """Apărare contra DNS rebinding: un site extern ar putea altfel citi sursa proiectului prin browserul utilizatorului."""
+    if host is None:  # clienți HTTP/1.0 fără Host
+        return True
+    h = host.strip().lower()
+    if h.startswith("["):  # [::1]:8765
+        h = h.split("]")[0] + "]"
+    else:
+        h = h.rsplit(":", 1)[0] if h.count(":") == 1 else h
+    return h in _LOCAL_HOSTS
 
 
 def make_handler(data_dir: Path):
-    class Handler(SimpleHTTPRequestHandler):
+    class Handler(BaseHTTPRequestHandler):  # nu SimpleHTTPRequestHandler: acela ar servi și HEAD/GET din directorul curent
         def log_message(self, *a):  # liniște în terminalul VS Code
             pass
 
@@ -33,6 +46,8 @@ def make_handler(data_dir: Path):
                 self._send(f"eroare internă: {type(e).__name__}: {e}".encode(), "text/plain; charset=utf-8", 500)
 
         def _route(self):
+            if not _is_local_host(self.headers.get("Host")):
+                return self._send(b"forbidden host", "text/plain", 403)
             path = self.path.split("?")[0]
             if path in ("/", "/index.html"):
                 return self._send(VIEWER.read_bytes(), "text/html; charset=utf-8")
@@ -55,8 +70,8 @@ def make_handler(data_dir: Path):
 def serve(data_dir: Path, port: int, open_browser: bool):
     try:
         httpd = ThreadingHTTPServer(("127.0.0.1", port), make_handler(data_dir))
-    except OSError as e:
-        print(f"[flowmap] nu pot porni pe portul {port} ({e.strerror}); alege altul cu --port", file=sys.stderr)
+    except (OSError, OverflowError) as e:  # port ocupat / în afara intervalului 0-65535
+        print(f"[flowmap] nu pot porni pe portul {port} ({getattr(e, 'strerror', None) or e}); alege altul cu --port", file=sys.stderr)
         return 1
     url = f"http://127.0.0.1:{port}/"
     print(f"[flowmap] vizualizator: {url}  (date din {data_dir})")

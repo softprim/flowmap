@@ -42,3 +42,27 @@ def test_ambiguous_calls_syntax_errors_and_routes(tmp_path):
     # b.use -> b.helper: preferă ținta din același fișier, neambiguu
     use = [e for e in s["call_edges"] if e["from"] == "b.py::use"]
     assert use == [{"from": "b.py::use", "to": "b.py::helper", "line": 2, "ambiguous": False}]
+
+
+def test_bom_and_coding_cookie_are_parsed(tmp_path):
+    """Ca interpretorul: BOM UTF-8 și `# -*- coding: latin-1 -*-` sunt acceptate; octeții invalizi nu pierd fișierul."""
+    (tmp_path / "bom.py").write_bytes(b"\xef\xbb\xbfdef with_bom():\n    return 1\n")
+    (tmp_path / "latin.py").write_bytes(b"# -*- coding: latin-1 -*-\nX = 'caf\xe9'\ndef latin():\n    return X\n")
+    (tmp_path / "raw.py").write_bytes(b"def raw():\n    return '\xff\xfe'\n")
+    s = build_static(tmp_path)
+    assert not any("error" in m for m in s["modules"]), s["modules"]
+    assert {f["qualname"] for f in s["functions"]} == {"with_bom", "latin", "raw"}
+
+
+def test_relative_imports_are_resolved(tmp_path, static):
+    edges = {(e["from"], e["to"]) for e in static["import_edges"]}
+    assert {("shop.orders", "shop.catalog"), ("shop.orders", "shop.pricing"), ("main", "shop.orders")} <= edges
+    pkg = tmp_path / "pkg"; sub = pkg / "sub"
+    sub.mkdir(parents=True)
+    (pkg / "__init__.py").write_text("from . import a\n")
+    (pkg / "a.py").write_text("def fa(): pass\n")
+    (pkg / "b.py").write_text("from .a import fa\n")
+    (sub / "__init__.py").write_text("")
+    (sub / "c.py").write_text("from ..a import fa\nfrom .. import b\nfrom . import missing\n")
+    s = build_static(tmp_path)
+    assert {(e["from"], e["to"]) for e in s["import_edges"]} == {("pkg", "pkg.a"), ("pkg.b", "pkg.a"), ("pkg.sub.c", "pkg.a"), ("pkg.sub.c", "pkg.b"), ("pkg.sub.c", "pkg"), ("pkg.sub.c", "pkg.sub")}

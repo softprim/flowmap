@@ -81,13 +81,16 @@ def main(argv: list[str] | None = None) -> int:
             print(f"[flowmap] id de apel invalid (trace-ul are {len(t['calls'])} apeluri)", file=sys.stderr)
             return 2
         fn = {"backward": slicer.backward_slice, "forward": slicer.forward_slice, "both": slicer.full_slice}[ns.direction]
+        try:  # Windows: stdout redirecționat e cp1252 și ar crăpa pe diacriticele din valorile trasate
+            sys.stdout.reconfigure(errors="backslashreplace")
+        except (AttributeError, ValueError):
+            pass
         print(slicer.describe(t, fn(t, ns.call_id)))
         return 0
 
     if ns.cmd == "serve":
         from .server import serve
-        serve(out, ns.port, ns.open)
-        return 0
+        return serve(out, ns.port, ns.open)
 
     if ns.cmd == "all":
         from .static_map import save_static
@@ -103,8 +106,7 @@ def main(argv: list[str] | None = None) -> int:
                 ns.port = int(script_args[i + 1]); del script_args[i : i + 2]
         save_static(root, out / "static.json")
         run_traced(root, ns.target, script_args, ns.as_module, out / "trace.json")
-        serve(out, ns.port, ns.open)
-        return 0
+        return serve(out, ns.port, ns.open)
     return 1
 
 

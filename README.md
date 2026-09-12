@@ -1,6 +1,6 @@
 # flowmap
 
-[![CI](https://github.com/OWNER/flowmap/actions/workflows/ci.yml/badge.svg)](https://github.com/OWNER/flowmap/actions/workflows/ci.yml)
+[![CI](https://github.com/softprim/flowmap/actions/workflows/ci.yml/badge.svg)](https://github.com/softprim/flowmap/actions/workflows/ci.yml)
 
 Hartă vizuală a execuției și a fluxului de date pentru proiecte Python, cu feliere dinamică,
 gândită să fie folosită din VS Code. Prototip pentru lucrarea de licență
@@ -25,7 +25,7 @@ funcționează bine pe fluxuri „return → argument”.
 ## Instalare
 
 ```bash
-pip install git+https://github.com/OWNER/flowmap.git
+pip install git+https://github.com/softprim/flowmap.git
 # sau, din clonă: pip install -e ".[test]" && python -m pytest
 ```
 
@@ -111,7 +111,7 @@ pip install -e ".[test]" && python -m pytest -q
 pip install playwright && python -m playwright install chromium
 ```
 
-27 de teste: tracer (arbore de apeluri, valori, excepții, generatoare/async, thread-uri, overflow, excluderea
+37 de teste: tracer (arbore de apeluri, valori, excepții, generatoare/async, thread-uri, overflow, excluderea
 bibliotecilor), schelet static (ambiguitate, fișiere cu erori de sintaxă, rute), feliere, CLI, server HTTP
 (inclusiv path traversal) și un test end-to-end în Chromium care verifică felierea în graf. CI rulează pe
 Linux, Windows și macOS cu Python 3.12 și 3.13.
