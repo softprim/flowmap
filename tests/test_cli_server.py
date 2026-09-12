@@ -142,3 +142,56 @@ def test_project_without_functions_and_empty_trace(tmp_path):
         assert json.loads(urllib.request.urlopen(base + "/api/trace").read())["calls"] == []
     finally:
         httpd.shutdown()
+
+
+def test_root_and_out_accepted_after_subcommand(tmp_path):
+    """`flowmap run --root x main.py` și `flowmap static --root x --out y` trebuie să meargă, nu doar cu opțiunile înaintea subcomenzii."""
+    import shutil
+    from tests.conftest import SHOP
+    root = tmp_path / "shop"
+    shutil.copytree(SHOP, root, ignore=shutil.ignore_patterns(".flowmap*", "__pycache__"))
+    r = run_cli("static", "--root", str(root), "--out", "fm-out", cwd=tmp_path)
+    assert r.returncode == 0 and (root / "fm-out" / "static.json").exists(), r.stderr
+    r = run_cli("run", "--root", str(root), "--out", "fm-out", "main.py", cwd=tmp_path)
+    assert r.returncode == 0 and "32 apeluri" in r.stderr, r.stderr
+    r = run_cli("slice", "--root", str(root), "--out", "fm-out", "26", cwd=tmp_path)
+    assert r.returncode == 0 and "apply_discount" in r.stdout
+    assert run_cli("--root", str(root), "--out", "fm-out", "slice", "26").returncode == 0  # ordinea veche merge în continuare
+
+
+def test_script_resolved_relative_to_cwd_then_root(tmp_path):
+    """Calea scriptului se rezolvă ca în shell (față de directorul curent), apoi față de --root."""
+    import shutil
+    from tests.conftest import SHOP
+    root = tmp_path / "shop"
+    shutil.copytree(SHOP, root, ignore=shutil.ignore_patterns(".flowmap*", "__pycache__"))
+    sub = root / "scripts"; sub.mkdir()
+    (sub / "local.py").write_text("from shop.pricing import add_vat\nprint(add_vat(10))\n", encoding="utf-8")
+    r = run_cli("--root", "..", "run", "local.py", cwd=sub)          # există doar în cwd
+    assert r.returncode == 0 and "11.9" in r.stdout and "1 apeluri" in r.stderr, r.stderr
+    r = run_cli("--root", "..", "run", "main.py", cwd=sub)           # există doar sub root
+    assert r.returncode == 0 and "32 apeluri" in r.stderr, r.stderr
+    r = run_cli("--root", "..", "run", "nope.py", cwd=sub)
+    assert r.returncode == 2 and str(sub / "nope.py") in r.stderr and str(root / "nope.py") in r.stderr
+
+
+def test_warns_when_script_outside_root_or_trace_empty(tmp_path):
+    other = tmp_path / "altundeva"; other.mkdir()
+    (other / "app.py").write_text("def f(): return 1\nf()\n", encoding="utf-8")
+    proj = tmp_path / "proiect"; proj.mkdir()
+    r = run_cli("--root", str(proj), "run", str(other / "app.py"))
+    assert r.returncode == 0
+    assert "în afara rădăcinii" in r.stderr and f"--root {other}" in r.stderr
+    assert "0 apeluri" in r.stderr and "nicio funcție" in r.stderr
+    (proj / "s.py").write_text("print('fără funcții')\n", encoding="utf-8")
+    r = run_cli("--root", str(proj), "run", "s.py")
+    assert r.returncode == 0 and "nicio funcție" in r.stderr and "în afara" not in r.stderr
+
+
+def test_warns_when_flowmap_options_after_script(tmp_path):
+    (tmp_path / "s.py").write_text("import sys; print(sys.argv[1:])\n", encoding="utf-8")
+    r = run_cli("--root", str(tmp_path), "run", "s.py", "--root", "/x", "--verbose")
+    assert r.returncode == 0 and "['--root', '/x', '--verbose']" in r.stdout      # argumentele ajung la script, neschimbate
+    assert "apare după script" in r.stderr and "flowmap run --root /x script.py" in r.stderr
+    r = run_cli("--root", str(tmp_path), "run", "s.py", "--verbose")
+    assert "apare după script" not in r.stderr

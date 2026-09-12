@@ -15,7 +15,11 @@ Reparații găsite la revizia de cod și la rularea pe proiecte reale (tomli, at
   cererile cu alt `Host` decât `127.0.0.1`/`localhost` primesc 403 (apărare contra DNS rebinding);
   portul invalid nu mai lasă un traceback, iar codul de ieșire al lui `serve`/`all` reflectă eroarea.
 - CLI: `flowmap slice` nu mai crapă pe Windows când stdout e redirecționat (cp1252) și valorile conțin diacritice.
-- 10 teste noi: stivă echilibrată la throw/close, `sys._getframe` lipsă, BOM/cookie de codificare, importuri relative,
+- CLI, după feedback de la primii utilizatori: `--root`/`--out` acceptate și după subcomandă; calea scriptului se
+  rezolvă față de directorul curent, apoi față de `--root`, iar mesajul de „nu găsesc” arată ambele căi încercate;
+  avertisment când scriptul e în afara rădăcinii (nu ar fi trasat), când trace-ul iese gol și când opțiuni flowmap
+  apar după script (ajung în `sys.argv` al scriptului).
+- 14 teste noi: stivă echilibrată la throw/close, `sys._getframe` lipsă, BOM/cookie de codificare, importuri relative,
   `Host` străin și `HEAD`, port invalid, stdout cp1252, căi cu spații și diacritice, proiect fără funcții / trace gol.
 
 ## 0.1.0 — 2026-09-12

@@ -59,7 +59,13 @@ python -m flowmap slice 26 --direction backward   # felia unui apel, în termina
 python -m flowmap serve --open                # vizualizator
 python -m flowmap all --open main.py          # toate trei (opțiunile flowmap înaintea scriptului)
 ```
-Toate comenzile acceptă `--root <dir>` (implicit directorul curent) și `--out <dir>` (implicit `.flowmap`).
+Toate comenzile acceptă `--root <dir>` (rădăcina proiectului, implicit directorul curent) și `--out <dir>`
+(implicit `.flowmap`), înainte sau după subcomandă: `flowmap run --root proiect main.py`.
+
+Regula pentru `run` și `all`: **tot ce urmează după script ajunge la script**, în `sys.argv`. Opțiunile flowmap
+(`--root`, `--out`, `--max-calls`, `--port`, `--open`) se pun înaintea scriptului; dacă apar după el, flowmap
+avertizează. Calea scriptului se rezolvă ca în shell, față de directorul curent, apoi față de `--root`.
+Se trasează doar codul de sub `--root`: dacă scriptul e în altă parte sau trace-ul iese gol, flowmap spune de ce.
 
 Demo: `cd examples/shop && python -m flowmap all --open main.py` — comanda lui „Bogdan” produce
 un total negativ (bug logic plantat în `apply_discount`), comanda lui „Carmen” eșuează pe stoc.
@@ -111,7 +117,7 @@ pip install -e ".[test]" && python -m pytest -q
 pip install playwright && python -m playwright install chromium
 ```
 
-37 de teste: tracer (arbore de apeluri, valori, excepții, generatoare/async, thread-uri, overflow, excluderea
+41 de teste: tracer (arbore de apeluri, valori, excepții, generatoare/async, thread-uri, overflow, excluderea
 bibliotecilor), schelet static (ambiguitate, fișiere cu erori de sintaxă, rute), feliere, CLI, server HTTP
 (inclusiv path traversal) și un test end-to-end în Chromium care verifică felierea în graf. CI rulează pe
 Linux, Windows și macOS cu Python 3.12 și 3.13.

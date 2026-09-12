@@ -16,39 +16,61 @@ def _tolerant_stdio():
             pass
 
 
+_FLOWMAP_OPTIONS = ("--root", "--out", "--max-calls", "--port", "--open")
+
+
+def _warn_options_after_script(script_args: list[str]) -> None:
+    """`flowmap run main.py --root .` trimite `--root .` scriptului, nu flowmap-ului; spunem asta explicit."""
+    found = []
+    for i, a in enumerate(script_args):
+        if a.split("=")[0] in _FLOWMAP_OPTIONS:
+            found.append(a)
+            if "=" not in a and a != "--open" and i + 1 < len(script_args) and not script_args[i + 1].startswith("-"):
+                found.append(script_args[i + 1])   # și valoarea, ca sugestia să fie completă
+    if found:
+        print(f"[flowmap] atenție: {' '.join(found)} apare după script, deci ajunge în sys.argv al scriptului, nu la flowmap."
+              f" Opțiunile flowmap se pun înaintea scriptului: flowmap run {' '.join(found)} script.py", file=sys.stderr)
+
+
 def main(argv: list[str] | None = None) -> int:
     _tolerant_stdio()
-    p = argparse.ArgumentParser(prog="flowmap", description="Hartă vizuală a execuției și a fluxului de date (Python 3.12+)")
+    p = argparse.ArgumentParser(prog="flowmap", description="Hartă vizuală a execuției și a fluxului de date (Python 3.12+)",
+                                epilog="Opțiunile --root/--out pot sta oriunde înaintea scriptului: `flowmap run --root proiect main.py`."
+                                       " Tot ce urmează după script ajunge la script.")
     from . import __version__
     p.add_argument("--version", action="version", version=f"flowmap {__version__}")
     p.add_argument("--root", default=".", help="rădăcina proiectului (implicit: directorul curent)")
     p.add_argument("--out", default=".flowmap", help="directorul de ieșire (implicit: .flowmap)")
+    # aceleași opțiuni acceptate și după subcomandă (`flowmap run --root x main.py`); SUPPRESS: nu suprascriu valoarea globală dacă lipsesc
+    common = argparse.ArgumentParser(add_help=False)
+    common.add_argument("--root", default=argparse.SUPPRESS, help=argparse.SUPPRESS)
+    common.add_argument("--out", default=argparse.SUPPRESS, help=argparse.SUPPRESS)
     sub = p.add_subparsers(dest="cmd", required=True)
 
-    s = sub.add_parser("static", help="extrage scheletul static (module, funcții, apeluri, puncte de intrare)")
+    s = sub.add_parser("static", parents=[common], help="extrage scheletul static (module, funcții, apeluri, puncte de intrare)")
 
-    r = sub.add_parser("run", help="rulează un script sub tracer și salvează trace-ul")
-    r.add_argument("target", help="script.py sau, cu -m, numele modulului (ex: -m pytest)")
+    r = sub.add_parser("run", parents=[common], help="rulează un script sub tracer și salvează trace-ul")
+    r.add_argument("target", help="script.py (față de directorul curent) sau, cu -m, numele modulului (ex: -m pytest)")
     r.add_argument("-m", dest="as_module", action="store_true", help="rulează ca modul")
     r.add_argument("--max-calls", type=int, default=None, help="limită de apeluri înregistrate (implicit 200000)")
-    r.add_argument("args", nargs=argparse.REMAINDER, help="argumente pentru script")
+    r.add_argument("args", nargs=argparse.REMAINDER, help="argumente pentru script (tot ce urmează după script)")
 
-    sl = sub.add_parser("slice", help="afișează în terminal felia unui apel din trace")
+    sl = sub.add_parser("slice", parents=[common], help="afișează în terminal felia unui apel din trace")
     sl.add_argument("call_id", type=int, help="id-ul apelului (vezi #id în vizualizator)")
     sl.add_argument("--direction", choices=["backward", "forward", "both"], default="both")
 
-    v = sub.add_parser("serve", help="pornește vizualizatorul local")
+    v = sub.add_parser("serve", parents=[common], help="pornește vizualizatorul local")
     v.add_argument("--port", type=int, default=8765)
     v.add_argument("--open", action="store_true", help="deschide în browser")
 
-    a = sub.add_parser("all", help="static + run + serve, într-un singur pas (opțiunile înaintea scriptului: flowmap all --open main.py)")
+    a = sub.add_parser("all", parents=[common], help="static + run + serve, într-un singur pas (opțiunile înaintea scriptului: flowmap all --open main.py)")
     a.add_argument("target")
     a.add_argument("-m", dest="as_module", action="store_true")
     a.add_argument("--port", type=int, default=8765)
     a.add_argument("--open", action="store_true")
     a.add_argument("args", nargs=argparse.REMAINDER)
 
-    sub.add_parser("init-vscode", help="scrie .vscode/tasks.json cu task-urile flowmap în proiectul curent")
+    sub.add_parser("init-vscode", parents=[common], help="scrie .vscode/tasks.json cu task-urile flowmap în proiectul curent")
 
     ns = p.parse_args(argv)
     root = Path(ns.root).resolve()
@@ -78,6 +100,7 @@ def main(argv: list[str] | None = None) -> int:
 
     if ns.cmd == "run":
         from .tracer import DEFAULT_MAX_CALLS, run_traced
+        _warn_options_after_script(ns.args)
         return run_traced(root, ns.target, ns.args, ns.as_module, out / "trace.json", ns.max_calls or DEFAULT_MAX_CALLS)
 
     if ns.cmd == "slice":
@@ -111,6 +134,7 @@ def main(argv: list[str] | None = None) -> int:
             i = script_args.index("--port")
             if i + 1 < len(script_args) and script_args[i + 1].isdigit():
                 ns.port = int(script_args[i + 1]); del script_args[i : i + 2]
+        _warn_options_after_script(script_args)
         save_static(root, out / "static.json")
         run_traced(root, ns.target, script_args, ns.as_module, out / "trace.json")
         return serve(out, ns.port, ns.open)

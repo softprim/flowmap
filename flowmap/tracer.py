@@ -310,20 +310,35 @@ class Tracer:
         return out
 
 
+def resolve_script(root: Path, target: str) -> Path | None:
+    """Calea scriptului, ca în shell: față de directorul curent; dacă nu există acolo, față de --root."""
+    candidates = [Path(target).resolve(), (root / target).resolve()]
+    for c in candidates:
+        if c.is_file():
+            return c
+    return None
+
+
 def run_traced(root: Path, target: str, argv: list[str], as_module: bool, out: Path,
                max_calls: int = DEFAULT_MAX_CALLS) -> int:
     """Rulează un script/modul sub tracer și scrie trace-ul la final (chiar și la excepție)."""
     import runpy
 
     root = root.resolve()
+    if not as_module:
+        script = resolve_script(root, target)
+        if script is None:
+            tried = " sau ".join(dict.fromkeys(str(c) for c in (Path(target).resolve(), (root / target).resolve())))
+            print(f"[flowmap] nu găsesc scriptul {target} (am căutat {tried})", file=sys.stderr)
+            return 2
+        if not script.is_relative_to(root):
+            print(f"[flowmap] atenție: scriptul {script} e în afara rădăcinii {root}; se trasează doar codul de sub rădăcină."
+                  f" Dacă acesta e proiectul tău, rulează cu --root {script.parent}", file=sys.stderr)
+        target = str(script)
     if str(root) not in sys.path:
         sys.path.insert(0, str(root))
+    old_cwd = os.getcwd()
     os.chdir(root)
-    if not as_module:
-        target = str((root / target).resolve()) if not Path(target).is_absolute() else target
-        if not Path(target).exists():
-            print(f"[flowmap] nu găsesc scriptul {target}", file=sys.stderr)
-            return 2
     tracer = Tracer(root, max_calls=max_calls)
     old_argv = sys.argv
     sys.argv = [target, *argv]
@@ -348,4 +363,11 @@ def run_traced(root: Path, target: str, argv: list[str], as_module: bool, out: P
         tracer.save(out)
         n = len(tracer.calls)
         print(f"[flowmap] {n} apeluri înregistrate -> {out}" + (" (TRUNCHIAT la limită)" if tracer.overflow else ""), file=sys.stderr)
+        if n == 0:
+            print(f"[flowmap] nicio funcție definită sub {root} nu a fost apelată. Verifică --root (rădăcina proiectului,"
+                  f" implicit directorul curent) și că scriptul apelează funcții din proiect.", file=sys.stderr)
+        try:
+            os.chdir(old_cwd)  # API apelabil in-process: nu lăsăm procesul cu directorul schimbat
+        except OSError:
+            pass
     return code
