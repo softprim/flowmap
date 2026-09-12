@@ -19,7 +19,9 @@ jobs:
         with:
           python-version: ${{ matrix.python }}
       - run: pip install -e ".[test]"
-      - run: php -v
+      - name: PHP (dacă lipsește, testele PHP se sar)
+        shell: bash
+        run: php -v || echo "php indisponibil pe acest runner"
       - name: Browser pentru testul de integrare al vizualizatorului (doar Ubuntu)
         if: runner.os == 'Linux'
         run: |
